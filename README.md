@@ -22,8 +22,32 @@ No bulk imports, silent joins, selfbots, or use of other people's stored account
 
 Generate `TOKEN_ENCRYPTION_KEY` as 32 random bytes encoded as 64 hex characters. Generate `SESSION_SECRET` as a long random secret. Never commit real secrets or expose the Supabase service-role key in browser code.
 
+## Required Vercel environment variables
+- `APP_URL`
+- `DISCORD_CLIENT_ID`
+- `DISCORD_CLIENT_SECRET`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_REDIRECT_URI`
+- `DEST_GUILD_ID`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `TOKEN_ENCRYPTION_KEY`
+- `SESSION_SECRET`
+- `NEXT_PUBLIC_SERVER_NAME`
+
 ## Supabase
 The app expects the private `public.member_authorizations` table with `discord_user_id` (primary key), `token_bundle_enc`, `expires_at`, `created_at`, and `updated_at`. Keep RLS enabled and do not grant anon/authenticated access. The service-role key is used only by server routes.
+
+## Optional bot panel
+The separate file `bot_integration/member_pull_panel.py` registers a `!setup_pull_panel` command on a discord.py bot. Copy that file into your existing bot project only when you are ready; this repository does not modify the existing bot. Then add this to your bot startup code, replacing the URL with your deployed site URL:
+
+```py
+from member_pull_panel import setup_member_pull_panel
+
+setup_member_pull_panel(bot, "https://YOUR-VERCEL-DOMAIN")
+```
+
+The command requires Manage Server permission and posts a link button to the consent-based website.
 
 ## Notes
 - OAuth authorization is user-initiated and consent-based.
