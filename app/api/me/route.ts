@@ -7,7 +7,5 @@ export async function GET() {
   const r = await supabaseRequest(`member_authorizations?select=discord_user_id&discord_user_id=eq.${encodeURIComponent(id)}&limit=1`);
   if (!r.ok) return NextResponse.json({ connected: false, error: "database" }, { status: 500 });
   const rows = await r.json();
-  if (!rows.length) return NextResponse.json({ connected: false });
-  const user = await fetch("https://discord.com/api/v10/users/@me", { headers: { Authorization: "Bot " + (process.env.DISCORD_BOT_TOKEN || "") } });
-  return NextResponse.json({ connected: true, username: "Discord member" });
+  return NextResponse.json({ connected: rows.length > 0, username: rows.length ? "your Discord account" : undefined });
 }
