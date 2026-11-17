@@ -1,5 +1,11 @@
 import logging
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Read bot/.env if present; variables configured by the host take priority.
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
 
 import discord
 from discord import app_commands
@@ -23,7 +29,18 @@ def env_int(name: str, fallback: int) -> int:
     return int(raw)
 
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip().strip('"').strip("'")
+def read_bot_token() -> str:
+    """Accept common token variable names without ever logging the secret."""
+    for name in ("DISCORD_BOT_TOKEN", "BOT_TOKEN", "TOKEN"):
+        value = os.getenv(name, "").strip().strip('"').strip("'")
+        if value:
+            log.info("Discord token loaded from environment variable %s.", name)
+            return value
+    log.error("No token found. Checked DISCORD_BOT_TOKEN, BOT_TOKEN, and TOKEN.")
+    return ""
+
+
+TOKEN = read_bot_token()
 # Defaults keep the bot bootable on hosts that fail to inject Startup variables.
 # These are still overridable from BotKeep.
 OWNER_USER_ID = env_int("OWNER_USER_ID", 1326234591979376771)
@@ -34,7 +51,7 @@ VERIFY_URL = os.getenv(
 ).strip().rstrip("/")
 
 if not TOKEN:
-    raise RuntimeError("Missing DISCORD_BOT_TOKEN.")
+    raise RuntimeError("Missing Discord bot token. Set DISCORD_BOT_TOKEN (recommended), BOT_TOKEN, or TOKEN in the host environment, or add bot/.env.")
 if not VERIFY_URL.startswith("https://"):
     raise RuntimeError("VERIFY_URL must start with https://")
 
