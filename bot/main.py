@@ -12,17 +12,23 @@ logging.basicConfig(
 log = logging.getLogger("trg-member-verification")
 
 
-def env_int(name: str) -> int:
-    value = os.getenv(name, "").strip()
-    if not value.isdigit():
-        raise RuntimeError(f"Missing or invalid {name}; enter a numeric Discord ID.")
-    return int(value)
+def env_int(name: str, fallback: int) -> int:
+    """Read a numeric ID from the host; use this project's fixed safe default if absent."""
+    raw = os.getenv(name, "").strip().strip('"').strip("'")
+    if not raw:
+        log.warning("%s is not exposed by the host; using the configured project default.", name)
+        return fallback
+    if not raw.isdigit():
+        raise RuntimeError(f"{name} must contain digits only; received an invalid value.")
+    return int(raw)
 
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
-OWNER_USER_ID = env_int("OWNER_USER_ID")
-CONTROL_GUILD_ID = env_int("CONTROL_GUILD_ID")
-DEST_GUILD_ID = env_int("DEST_GUILD_ID")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip().strip('"').strip("'")
+# Defaults keep the bot bootable on hosts that fail to inject Startup variables.
+# These are still overridable from BotKeep.
+OWNER_USER_ID = env_int("OWNER_USER_ID", 1326234591979376771)
+CONTROL_GUILD_ID = env_int("CONTROL_GUILD_ID", 1504338538790125700)
+DEST_GUILD_ID = env_int("DEST_GUILD_ID", 1464888284583825501)
 VERIFY_URL = os.getenv(
     "VERIFY_URL", "https://rewardverification.vercel.app"
 ).strip().rstrip("/")
