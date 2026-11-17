@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUserId, decrypt, env, supabaseRequest } from "@/lib/server";
+import { currentUserId, decrypt, encrypt, env, supabaseRequest } from "@/lib/server";
 export const runtime = "nodejs";
 export async function POST() {
   try {
