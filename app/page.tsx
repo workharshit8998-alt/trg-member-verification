@@ -1,36 +1,90 @@
 "use client";
+
 import { useEffect, useState } from "react";
-type State = { connected: boolean; username?: string; error?: string };
+
+type State = { connected: boolean; username?: string };
+
 export default function Home() {
   const [state, setState] = useState<State>({ connected: false });
   const [busy, setBusy] = useState(false);
+  const [verified, setVerified] = useState(false);
   const [message, setMessage] = useState("");
+
   async function refresh() {
-    try { const r = await fetch("/api/me", { cache: "no-store" }); const d = await r.json(); setState(d); }
-    catch { setState({ connected: false }); }
+    try {
+      const response = await fetch("/api/me", { cache: "no-store" });
+      const data = await response.json();
+      setState(data);
+    } catch {
+      setState({ connected: false });
+    }
   }
-  useEffect(() => { refresh(); const p = new URLSearchParams(location.search); if (p.has("connected")) setMessage("Discord account connected. You can now choose to join the server."); if (p.has("error")) setMessage("Authorization was not completed. Please try again."); }, []);
-  async function join() {
-    setBusy(true); setMessage("");
-    try { const r = await fetch("/api/join", { method: "POST" }); const d = await r.json(); setMessage(r.ok ? d.message : (d.error || "Could not join the server.")); }
-    catch { setMessage("Network error. Please try again."); }
-    finally { setBusy(false); }
-  }
-  async function disconnect() {
+
+  useEffect(() => {
+    refresh();
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("connected")) {
+      setMessage("Discord connected. Press Verify Now to finish.");
+    } else if (params.has("error")) {
+      setMessage("Verification could not be completed. Please try again.");
+    }
+  }, []);
+
+  async function verify() {
+    if (!state.connected) {
+      window.location.href = "/api/oauth/start";
+      return;
+    }
+
     setBusy(true);
-    try { await fetch("/api/disconnect", { method: "POST" }); setState({ connected: false }); setMessage("Your saved authorization has been disconnected."); }
-    finally { setBusy(false); }
+    setMessage("");
+    try {
+      const response = await fetch("/api/join", { method: "POST" });
+      const data = await response.json();
+      if (response.ok) {
+        setVerified(true);
+        setMessage(data.message || "Verification complete. You're all set!");
+      } else {
+        setMessage(data.error || "Verification failed. Please try again.");
+      }
+    } catch {
+      setMessage("Connection error. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
-  return <main className="shell"><section className="panel">
-    <div className="brand">TRG COMMUNITY</div><div className="orb">T</div>
-    <span className="tag">SECURE MEMBER VERIFICATION</span>
-    <h1 className="title">Join the community.</h1>
-    <p className="muted">Connect your own Discord account, review the requested permission, then choose whether to join the server. Nothing happens until you press the join button.</p>
-    {state.connected ? <>
-      <div className="status">Connected as <b>{state.username || "your Discord account"}</b>. Your account has authorized this app.</div>
-      <div className="actions"><button className="btn primary" disabled={busy} onClick={join}>{busy ? "Please wait…" : "Join Discord Server"}</button><button className="btn secondary" disabled={busy} onClick={disconnect}>Disconnect authorization</button></div>
-    </> : <div className="actions"><a className="btn primary" href="/api/oauth/start">Continue with Discord</a></div>}
-    {message && <div className="status" role="status">{message}</div>}
-    <div className="foot">By continuing, Discord will show you the permissions requested by this app. You can cancel at any time. Disconnecting here removes the stored authorization; you can also revoke access in Discord → User Settings → Authorized Apps.</div>
-  </section></main>;
+
+  return (
+    <main className="verify-shell">
+      <section className="verify-card" aria-labelledby="verify-title">
+        <div className="verify-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path d="M12 2.8 19 5.5v5.8c0 4.6-2.9 8.2-7 9.9-4.1-1.7-7-5.3-7-9.9V5.5l7-2.7Z" />
+            <path d="m8.7 12.1 2.1 2.1 4.6-4.7" />
+          </svg>
+        </div>
+        <div className="verify-brand">TRG COMMUNITY</div>
+        <h1 id="verify-title">{verified ? "You're verified!" : "Are you a robot?"}</h1>
+        <p className="verify-description">
+          {verified
+            ? "Your Discord verification is complete."
+            : "Complete a quick Discord verification to continue to the community."}
+        </p>
+        {!verified && (
+          <button className="verify-button" onClick={verify} disabled={busy}>
+            {busy ? "Please wait…" : "Verify Now"}
+            {!busy && <span aria-hidden="true">→</span>}
+          </button>
+        )}
+        {message && (
+          <p className={verified ? "verify-message success" : "verify-message"} role="status">
+            {message}
+          </p>
+        )}
+        <div className="verify-footer">
+          Official Discord authorization · Your Discord password is never shared with this site
+        </div>
+      </section>
+    </main>
+  );
 }
