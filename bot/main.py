@@ -1,7 +1,8 @@
-import os
 import logging
+import os
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 logging.basicConfig(
@@ -10,24 +11,44 @@ logging.basicConfig(
 )
 log = logging.getLogger("trg-member-verification")
 
+
+def env_int(name: str) -> int:
+    value = os.getenv(name, "").strip()
+    if not value.isdigit():
+        raise RuntimeError(f"Missing or invalid {name}; enter a numeric Discord ID.")
+    return int(value)
+
+
 TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
-VERIFY_URL = os.getenv("VERIFY_URL", "https://rewardverification.vercel.app").strip()
-DEST_GUILD_ID_RAW = os.getenv("DEST_GUILD_ID", "").strip()
+OWNER_USER_ID = env_int("OWNER_USER_ID")
+CONTROL_GUILD_ID = env_int("CONTROL_GUILD_ID")
+DEST_GUILD_ID = env_int("DEST_GUILD_ID")
+VERIFY_URL = os.getenv(
+    "VERIFY_URL", "https://rewardverification.vercel.app"
+).strip().rstrip("/")
 
 if not TOKEN:
-    raise RuntimeError("Missing DISCORD_BOT_TOKEN environment variable.")
-if not DEST_GUILD_ID_RAW.isdigit():
-    raise RuntimeError("DEST_GUILD_ID must be the numeric ID of the destination Discord server.")
+    raise RuntimeError("Missing DISCORD_BOT_TOKEN.")
 if not VERIFY_URL.startswith("https://"):
-    raise RuntimeError("VERIFY_URL must be an HTTPS URL.")
+    raise RuntimeError("VERIFY_URL must start with https://")
 
-DEST_GUILD_ID = int(DEST_GUILD_ID_RAW)
+CONTROL_GUILD = discord.Object(id=CONTROL_GUILD_ID)
+DEST_GUILD = discord.Object(id=DEST_GUILD_ID)
 
 intents = discord.Intents.default()
-intents.guilds = True
-intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+
+def owner_only(interaction: discord.Interaction) -> bool:
+    return interaction.user.id == OWNER_USER_ID
+
+
+def control_server_only(interaction: discord.Interaction) -> bool:
+    return interaction.guild_id == CONTROL_GUILD_ID
+
+
+def authorized(interaction: discord.Interaction) -> bool:
+    return owner_only(interaction) and control_server_only(interaction)
 
 
 class VerificationPanel(discord.ui.View):
@@ -45,62 +66,130 @@ class VerificationPanel(discord.ui.View):
 
 @bot.event
 async def on_ready() -> None:
-    log.info("Logged in as %s (%s)", bot.user, bot.user.id if bot.user else "unknown")
-    log.info("Restricted destination server: %s", DEST_GUILD_ID)
+    log.info("Logged in as %s (%s)", bot.user, bot.user.id if bot.user else "?")
+    log.info("Control server: %s | Default destination: %s", CONTROL_GUILD_ID, DEST_GUILD_ID)
 
 
-@bot.command(name="setup_pull_panel")
-@commands.guild_only()
-@commands.has_guild_permissions(manage_guild=True)
-async def setup_pull_panel(ctx: commands.Context) -> None:
-    if ctx.guild is None or ctx.guild.id != DEST_GUILD_ID:
-        await ctx.reply(
-            "This command is only enabled in the configured destination server.",
-            mention_author=False,
+@bot.event
+async def setup_hook() -> None:
+    # Register these commands only in the configured control server.
+    synced = await bot.tree.sync(guild=CONTROL_GUILD)
+    log.info("Synced %s slash commands to control server %s", len(synced), CONTROL_GUILD_ID)
+
+
+@bot.tree.command(
+    name="setup_pull_panel",
+    description="Post the member-consent verification panel",
+    guild=CONTROL_GUILD,
+)
+async def setup_pull_panel(interaction: discord.Interaction) -> None:
+    if not authorized(interaction):
+        await interaction.response.send_message(
+            "You are not allowed to use this command here.", ephemeral=True
         )
         return
 
     embed = discord.Embed(
         title="🔐 Server Member Verification",
         description=(
-            "Ready to join the community?\n\n"
+            "Want to join the community?\n\n"
             "1. Press **Verify & Join Server** below.\n"
-            "2. Sign in to Discord and review the requested access.\n"
-            "3. On the website, press **Verify Now** again to confirm joining.\n\n"
+            "2. Sign in to Discord and review the requested permissions.\n"
+            "3. After connecting, press **Verify Now** again to confirm joining.\n\n"
             "Your account is added only after you authorize Discord and confirm the join."
         ),
         color=discord.Color.from_rgb(112, 76, 230),
     )
-    embed.set_footer(text="TRG Community • Discord OAuth verification")
+    embed.add_field(
+        name="Default destination",
+        value=f"[Configured server](https://discord.com/channels/{DEST_GUILD_ID})",
+        inline=False,
+    )
+    embed.set_footer(text="TRG Member Verification • Consent-based OAuth")
+    await interaction.response.send_message(
+        "Panel posted.", ephemeral=True
+    )
+    await interaction.channel.send(embed=embed, view=VerificationPanel())
 
-    await ctx.send(embed=embed, view=VerificationPanel())
 
-
-@setup_pull_panel.error
-async def setup_pull_panel_error(
-    ctx: commands.Context, error: commands.CommandError
-) -> None:
-    if isinstance(error, commands.NoPrivateMessage):
-        return
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.reply(
-            "You need the **Manage Server** permission to post the verification panel.",
-            mention_author=False,
+@bot.tree.command(
+    name="data",
+    description="Show bot and server configuration status",
+    guild=CONTROL_GUILD,
+)
+async def data(interaction: discord.Interaction) -> None:
+    if not authorized(interaction):
+        await interaction.response.send_message(
+            "You are not allowed to use this command here.", ephemeral=True
         )
         return
-    log.warning("Command error: %s", error)
-    await ctx.reply("The panel could not be posted. Check the bot logs.", mention_author=False)
+
+    dest = bot.get_guild(DEST_GUILD_ID)
+    destination_status = (
+        f"Connected: **Yes** • Members: **{dest.member_count or 'unknown'}**"
+        if dest
+        else "Connected: **No** — invite the bot to the destination server."
+    )
+    embed = discord.Embed(title="Bot Configuration", color=discord.Color.blurple())
+    embed.add_field(name="Control server", value=str(CONTROL_GUILD_ID), inline=False)
+    embed.add_field(name="Default destination", value=str(DEST_GUILD_ID), inline=False)
+    embed.add_field(name="Destination bot access", value=destination_status, inline=False)
+    embed.add_field(name="Verification website", value=VERIFY_URL, inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.event
-async def on_command_error(
-    ctx: commands.Context, error: commands.CommandError
+@bot.tree.command(
+    name="pullable",
+    description="Explain which members can be added through verification",
+    guild=CONTROL_GUILD,
+)
+async def pullable(interaction: discord.Interaction) -> None:
+    if not authorized(interaction):
+        await interaction.response.send_message(
+            "You are not allowed to use this command here.", ephemeral=True
+        )
+        return
+
+    await interaction.response.send_message(
+        "Members are not bulk-imported or silently added. A person becomes a member "
+        "only after they personally authorize Discord on the verification website "
+        "and press the final **Verify Now** button. Ask them to use the panel; "
+        "the website completes their individual join.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
+    name="pull",
+    description="Show the consent-based joining instructions",
+    guild=CONTROL_GUILD,
+)
+@app_commands.describe(amount="Number of people you want to invite to verify")
+async def pull(interaction: discord.Interaction, amount: app_commands.Range[int, 1, 1000]) -> None:
+    if not authorized(interaction):
+        await interaction.response.send_message(
+            "You are not allowed to use this command here.", ephemeral=True
+        )
+        return
+
+    await interaction.response.send_message(
+        f"To invite up to **{amount}** people, share the verification panel link: "
+        f"{VERIFY_URL}\n\nEach person must authorize Discord and confirm their own "
+        "join. This command does not force-add or mass-join accounts.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.error
+async def on_app_command_error(
+    interaction: discord.Interaction, error: app_commands.AppCommandError
 ) -> None:
-    if isinstance(error, commands.CommandNotFound):
-        return
-    if isinstance(error, commands.CheckFailure):
-        return
-    log.exception("Unhandled command error", exc_info=error)
+    log.error("Slash command error: %s", error)
+    message = "Something went wrong. Check the bot host logs."
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
 
 
 bot.run(TOKEN)
