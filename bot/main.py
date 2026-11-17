@@ -64,17 +64,18 @@ class VerificationPanel(discord.ui.View):
         )
 
 
+_commands_synced = False
+
+
 @bot.event
 async def on_ready() -> None:
+    global _commands_synced
     log.info("Logged in as %s (%s)", bot.user, bot.user.id if bot.user else "?")
     log.info("Control server: %s | Default destination: %s", CONTROL_GUILD_ID, DEST_GUILD_ID)
-
-
-@bot.event
-async def setup_hook() -> None:
-    # Register these commands only in the configured control server.
-    synced = await bot.tree.sync(guild=CONTROL_GUILD)
-    log.info("Synced %s slash commands to control server %s", len(synced), CONTROL_GUILD_ID)
+    if not _commands_synced:
+        synced = await bot.tree.sync(guild=CONTROL_GUILD)
+        _commands_synced = True
+        log.info("Synced %s slash commands to control server %s", len(synced), CONTROL_GUILD_ID)
 
 
 @bot.tree.command(
